@@ -65,7 +65,7 @@ def handle_client(client_socket):
                         if USERS.get(msg['username']) == msg['password']:
                             username = msg['username']
                             CLIENTS[client_socket] = username
-                            response = {'type': 'login', 'status': 'ok'}
+                            response = {'type': 'login', 'status': 'ok', 'username': username}
                             client_socket.sendall((json.dumps(response) + '\n').encode())
                             broadcast({'type': 'status', 'user': username, 'state': 'online'}, client_socket)
                             print(f"[LOGIN] {username} connecté")
@@ -82,12 +82,38 @@ def handle_client(client_socket):
 
                     msg['from'] = username
                     msg['timestamp'] = datetime.now().isoformat()
-                    print(f"[MSG] {username} >> {msg['content']}")
-                    broadcast(msg, client_socket)
+
+                    if msg.get('subtype') == 'private':
+                        dest_user = msg.get('to')
+                        target_socket = None
+                        with LOCK:
+                            for sock, user in CLIENTS.items():
+                                if user == dest_user:
+                                    target_socket = sock
+                                    break
+                        if target_socket:
+                            try:
+                                target_socket.sendall((json.dumps(msg) + '\n').encode())
+                                print(f"[MP] {username} >> {dest_user} : {msg['content']}")
+                            except Exception as e:
+                                print(f"[ERREUR] envoi MP à {dest_user} : {e}")
+                        else:
+                            print(f"[INFO] Utilisateur {dest_user} introuvable pour message privé")
+                    else:
+                        print(f"[MSG] {username} >> {msg['content']}")
+                        broadcast(msg, client_socket)
 
                 elif msg['type'] == 'status' and username:
                     broadcast({'type': 'status', 'user': username, 'state': msg['state']}, client_socket)
                     print(f"[STATUS] {username} est maintenant {msg['state']}")
+
+                elif msg['type'] == 'users':
+                    # Retourner la liste des utilisateurs actuellement connectés
+                    with LOCK:
+                        connected_users = list(CLIENTS.values())
+                    response = {'type': 'users', 'users': connected_users}
+                    client_socket.sendall((json.dumps(response) + '\n').encode())
+                    print(f"[INFO] Liste des utilisateurs envoyée à {username or address}")
 
     except Exception as e:
         print(f'[ERREUR] Problème avec {address} ({username}):', e)
